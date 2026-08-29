@@ -143,14 +143,23 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
+          current_labels="$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name]')"
+
           remove_args=()
           while IFS= read -r label; do
             case "$label" in
+              review:pending) ;;
               review:*) remove_args+=(--remove-label "$label") ;;
             esac
-          done < <(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          done < <(printf '%s' "$current_labels" | jq -r '.[]')
 
-          gh pr edit "$PR_NUMBER" "${remove_args[@]}" --add-label "review:pending"
+          if [ "${#remove_args[@]}" -gt 0 ]; then
+            gh pr edit "$PR_NUMBER" "${remove_args[@]}"
+          fi
+
+          if [ "$(printf '%s' "$current_labels" | jq -r 'index("review:pending") != null')" != "true" ]; then
+            gh pr edit "$PR_NUMBER" --add-label "review:pending"
+          fi
 
       - name: Resolve manual command
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'pull_request_target'
@@ -212,24 +221,38 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           CHANGED_SENSITIVE_FILES: ${{ steps.safety.outputs.changed_sensitive_files }}
         run: |
+          current_labels="$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name]')"
+
           remove_args=()
           while IFS= read -r label; do
             case "$label" in
+              review:human-required) ;;
               review:*) remove_args+=(--remove-label "$label") ;;
             esac
-          done < <(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          done < <(printf '%s' "$current_labels" | jq -r '.[]')
 
-          gh pr edit "$PR_NUMBER" "${remove_args[@]}" --add-label "review:human-required"
+          if [ "${#remove_args[@]}" -gt 0 ]; then
+            gh pr edit "$PR_NUMBER" "${remove_args[@]}"
+          fi
 
-          gh pr comment "$PR_NUMBER" --body "<h3>Code Review Skipped</h3>
+          if [ "$(printf '%s' "$current_labels" | jq -r 'index("review:human-required") != null')" != "true" ]; then
+            gh pr edit "$PR_NUMBER" --add-label "review:human-required"
+          fi
 
-          Automated review was skipped because this PR changes review policy or trust-boundary files:
+          existing_skip="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+            | jq -s '[.[][] | select(.user.login == "openchamber-bot[bot]" and (.body | contains("Code Review Skipped")))] | length')"
 
-          \`\`\`
-          $CHANGED_SENSITIVE_FILES
-          \`\`\`
+          if [ "$existing_skip" -eq 0 ]; then
+            gh pr comment "$PR_NUMBER" --body "<h3>Code Review Skipped</h3>
 
-          Automated review cannot clear changes to its own policy or trust boundary. A maintainer must review it directly."
+            Automated review was skipped because this PR changes review policy or trust-boundary files:
+
+            \`\`\`
+            $CHANGED_SENSITIVE_FILES
+            \`\`\`
+
+            Automated review cannot clear changes to its own policy or trust boundary. A maintainer must review it directly."
+          fi
 
       - name: Debounce new commits
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name == 'pull_request_target' && github.event.action == 'synchronize'
@@ -348,15 +371,25 @@ jobs:
         run: |
           set_review_status() {
             local target_label="$1"
+            local current_labels
             local remove_args=()
+
+            current_labels="$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name]')"
 
             while IFS= read -r label; do
               case "$label" in
+                "$target_label") ;;
                 review:*) remove_args+=(--remove-label "$label") ;;
               esac
-            done < <(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+            done < <(printf '%s' "$current_labels" | jq -r '.[]')
 
-            gh pr edit "$PR_NUMBER" "${remove_args[@]}" --add-label "$target_label"
+            if [ "${#remove_args[@]}" -gt 0 ]; then
+              gh pr edit "$PR_NUMBER" "${remove_args[@]}"
+            fi
+
+            if [ "$(printf '%s' "$current_labels" | jq -r "index(\"$target_label\") != null")" != "true" ]; then
+              gh pr edit "$PR_NUMBER" --add-label "$target_label"
+            fi
           }
 
           fail_automation() {
@@ -467,10 +500,19 @@ jobs:
           fi
 
           remove_args=()
+          current_labels="$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name]')"
+
           while IFS= read -r label; do
             case "$label" in
+              review:automation-failed) ;;
               review:*) remove_args+=(--remove-label "$label") ;;
             esac
-          done < <(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          done < <(printf '%s' "$current_labels" | jq -r '.[]')
 
-          gh pr edit "$PR_NUMBER" "${remove_args[@]}" --add-label "review:automation-failed"
+          if [ "${#remove_args[@]}" -gt 0 ]; then
+            gh pr edit "$PR_NUMBER" "${remove_args[@]}"
+          fi
+
+          if [ "$(printf '%s' "$current_labels" | jq -r 'index("review:automation-failed") != null')" != "true" ]; then
+            gh pr edit "$PR_NUMBER" --add-label "review:automation-failed"
+          fi
