@@ -11,6 +11,7 @@ import {
   defaultCliVersion,
 } from './verify-linux-appimage.mjs';
 import { normalizeTargetArchitecture } from './target-architecture.mjs';
+import { readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
@@ -174,7 +175,7 @@ const main = () => {
     const result = verifyDebPayload({
       root: payloadRoot,
       targetArchitecture: target,
-      expectedOpenCodeVersion: rootPackage.dependencies?.['@opencode-ai/sdk'],
+      expectedOpenCodeVersion: readPinnedOpenCodeCliVersion(),
     });
     console.log(`[electron] verified Linux ${target} deb package: ${debPath}`);
     console.log(`[electron] verified OpenCode CLI ${result.openCodeVersion} and ${result.nativeModuleCount} native modules`);
